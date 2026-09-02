@@ -18,6 +18,7 @@ struct CameraView: View {
     @State private var captureLivePhotoPreview: PHLivePhoto?
     @State private var captureLivePhotoPlaybackID = 0
     @State private var captureAnimationTask: Task<Void, Never>?
+    @Namespace private var characterPadTransition
     let isActive: Bool
     let sendToGrade: (GradeImportItem) -> Void
 
@@ -126,7 +127,7 @@ struct CameraView: View {
         }
         .onChange(of: camera.selectedCamera) { _, selection in
             guard showsCharacterPad, selection.character == nil else { return }
-            withAnimation(.snappy(duration: 0.20)) {
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
                 showsCharacterPad = false
             }
         }
@@ -220,7 +221,7 @@ struct CameraView: View {
                         Color.clear
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                withAnimation(.snappy(duration: 0.20)) {
+                                withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
                                     showsCharacterPad = false
                                 }
                             }
@@ -313,7 +314,9 @@ struct CameraView: View {
                     if !showsCharacterPad {
                         ratioTimerTopControl
                         qualityTopControl
-                        characterPadTopControl
+                        if camera.selectedCamera.character != nil {
+                            characterPadTopControl
+                        }
                     }
                 }
             } else {
@@ -323,11 +326,15 @@ struct CameraView: View {
                     if !showsCharacterPad {
                         ratioTimerTopControl
                         qualityTopControl
-                        characterPadTopControl
+                        if camera.selectedCamera.character != nil {
+                            characterPadTopControl
+                        }
                     }
                 }
             }
         }
+        .animation(.spring(response: 0.34, dampingFraction: 0.86), value: showsCharacterPad)
+        .animation(.spring(response: 0.34, dampingFraction: 0.86), value: camera.selectedCamera)
     }
 
     private var flashTopControl: some View {
@@ -376,7 +383,7 @@ struct CameraView: View {
     private var characterPadTopControl: some View {
         Button {
             if camera.selectedCamera.character != nil {
-                withAnimation(.snappy(duration: 0.20)) {
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
                     showsCharacterPad = true
                 }
                 UISelectionFeedbackGenerator().selectionChanged()
@@ -390,6 +397,8 @@ struct CameraView: View {
                 .frame(width: 18, height: 18)
         }
         .hibiscusGlassButtonStyle()
+        .matchedGeometryEffect(id: "camera-character-pad", in: characterPadTransition)
+        .transition(.opacity.combined(with: .scale(scale: 0.72, anchor: .center)))
         .rotationEffect(cameraControlRotation)
         .accessibilityLabel("Character Pad")
         .accessibilityHint(
@@ -432,29 +441,55 @@ struct CameraView: View {
 
     private var qualityTopControl: some View {
         Menu {
-            Section("HEIF") {
+            Section("Current") {
+                Button(selectedCaptureQualityTitle) { }
+                    .disabled(true)
+            }
+            Menu("HEIF") {
                 ForEach(camera.availableMegapixels, id: \.self) { megapixels in
-                    Button("\(megapixels) MP") {
+                    Button {
                         camera.selectCapture(format: .processed, megapixels: megapixels)
+                    } label: {
+                        if camera.selectedFormat == .processed,
+                           camera.selectedMegapixels == megapixels {
+                            Label("\(megapixels) MP", systemImage: "checkmark")
+                        } else {
+                            Text("\(megapixels) MP")
+                        }
                     }
                 }
             }
-            Section("RAW") {
-                ForEach(camera.availableRawMegapixels, id: \.self) { megapixels in
-                    Button("RAW \(megapixels) MP") {
-                        camera.selectCapture(format: .raw, megapixels: megapixels)
+            Menu("RAW") {
+                if camera.availableRawMegapixels.isEmpty {
+                    Button("Unavailable") { }
+                        .disabled(true)
+                } else {
+                    ForEach(camera.availableRawMegapixels, id: \.self) { megapixels in
+                        Button {
+                            camera.selectCapture(format: .raw, megapixels: megapixels)
+                        } label: {
+                            if camera.selectedFormat == .raw,
+                               camera.selectedMegapixels == megapixels {
+                                Label("\(megapixels) MP", systemImage: "checkmark")
+                            } else {
+                                Text("\(megapixels) MP")
+                            }
+                        }
                     }
                 }
             }
+            .disabled(camera.availableRawMegapixels.isEmpty)
         } label: {
-            topSettingLabel(
-                camera.selectedFormat == .raw
-                    ? "RAW \(camera.selectedMegapixels)"
-                    : "\(camera.selectedMegapixels) MP"
-            )
+            topSettingLabel("\(camera.selectedMegapixels) MP")
         }
         .hibiscusGlassButtonStyle()
         .rotationEffect(cameraControlRotation)
+    }
+
+    private var selectedCaptureQualityTitle: String {
+        camera.selectedFormat == .raw
+            ? "RAW \(camera.selectedMegapixels) MP"
+            : "HEIF \(camera.selectedMegapixels) MP"
     }
 
     private func topSettingLabel(_ text: String) -> some View {
@@ -580,7 +615,8 @@ struct CameraView: View {
         .frame(width: 136, height: 136)
         .shadow(color: .black.opacity(0.30), radius: 3, y: 2)
         .shadow(color: .black.opacity(0.68), radius: 16, y: 8)
-        .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .topTrailing)))
+        .matchedGeometryEffect(id: "camera-character-pad", in: characterPadTransition)
+        .transition(.opacity.combined(with: .scale(scale: 0.82, anchor: .topTrailing)))
     }
 
     private var exposureControl: some View {

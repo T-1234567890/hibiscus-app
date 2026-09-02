@@ -102,6 +102,7 @@ final class CameraService: NSObject, ObservableObject {
     nonisolated(unsafe) private var supportedPhotoDimensions: [CMVideoDimensions] = []
     nonisolated(unsafe) private var capturePhotoDimensions = CMVideoDimensions(width: 0, height: 0)
     nonisolated(unsafe) private var captureTargetMegapixels = 12
+    nonisolated(unsafe) private var requestedPhotoMegapixels: Int?
     nonisolated(unsafe) private var pendingProcessedImage: UIImage?
     nonisolated(unsafe) private var pendingPreviewImage: UIImage?
     nonisolated(unsafe) private var pendingRawData: Data?
@@ -580,12 +581,17 @@ final class CameraService: NSObject, ObservableObject {
     func selectCapture(format: CaptureFormatOption, megapixels: Int) {
         guard format == .processed || isRAWAvailable else { return }
         resolutionLock.lock()
+        let hasNativeTarget = supportedPhotoDimensions.contains {
+            Self.megapixels(for: $0) == megapixels
+        }
         let selected: CMVideoDimensions?
-        if megapixels == 24, format == .processed {
-            // Native 24 MP delivery is deferred and cannot receive Hibiscus's
-            // full-resolution character processing. Capture the 48 MP source and
-            // produce a true 24 MP processed result locally instead.
-            selected = supportedPhotoDimensions.last
+        if format == .processed, megapixels == 24, !hasNativeTarget {
+            // Some devices expose 12 MP and 48 MP capture dimensions but no
+            // native 24 MP request. Capture the smallest valid higher source
+            // and let the existing final renderer produce the 24 MP result.
+            selected = supportedPhotoDimensions.first {
+                Self.megapixels(for: $0) > megapixels
+            }
         } else {
             selected = supportedPhotoDimensions.min {
                 abs(Self.megapixels(for: $0) - megapixels) < abs(Self.megapixels(for: $1) - megapixels)
@@ -593,10 +599,16 @@ final class CameraService: NSObject, ObservableObject {
         }
         if let selected { capturePhotoDimensions = selected }
         captureTargetMegapixels = megapixels
+        requestedPhotoMegapixels = megapixels
         resolutionLock.unlock()
         selectedFormat = format
         selectedMegapixels = megapixels
         if format == .raw { selectedMotion = .photo }
+#if DEBUG
+        sessionQueue.async { [weak self] in
+            self?.debugLogCameraConfiguration(context: "resolution selected")
+        }
+#endif
         UISelectionFeedbackGenerator().selectionChanged()
     }
 
@@ -605,7 +617,6 @@ final class CameraService: NSObject, ObservableObject {
         guard !isConfiguringLivePhoto else { return }
         if option == .photo {
             selectedMotion = .photo
-            restoreStillPhotoPipeline()
             UISelectionFeedbackGenerator().selectionChanged()
             return
         }
@@ -650,31 +661,6 @@ final class CameraService: NSObject, ObservableObject {
             finishAuthorization(false)
         @unknown default:
             finishAuthorization(false)
-        }
-    }
-
-    private func restoreStillPhotoPipeline() {
-        isConfiguringLivePhoto = true
-        previewRenderer.freeze()
-        sessionQueue.async { [weak self] in
-            guard let self else { return }
-            let wasRunning = self.session.isRunning
-            if wasRunning { self.session.stopRunning() }
-            self.session.beginConfiguration()
-            self.photoOutput.isLivePhotoCaptureEnabled = false
-            self.photoOutput.isLivePhotoAutoTrimmingEnabled = false
-            if let device = self.cameraInput?.device {
-                self.selectHighestResolutionPhotoFormat(for: device)
-                self.updateMaximumPhotoDimensions(for: device)
-            }
-            self.session.commitConfiguration()
-            if wasRunning { self.session.startRunning() }
-            self.updateLivePhotoAvailability()
-            Task { @MainActor in
-                self.isRunning = self.session.isRunning
-                self.isConfiguringLivePhoto = false
-                self.previewRenderer.resume()
-            }
         }
     }
 
@@ -894,13 +880,24 @@ final class CameraService: NSObject, ObservableObject {
 
     nonisolated private func configureSession() {
         session.beginConfiguration()
+        guard session.canSetSessionPreset(.photo) else {
+            session.commitConfiguration()
+            Task { @MainActor in
+                self.authorizationState = .unavailable
+                self.statusMessage = L10n.string("Hibiscus couldn’t start the camera.")
+            }
+            return
+        }
         session.sessionPreset = .photo
         var didConfigureSession = false
         defer {
             session.commitConfiguration()
             if didConfigureSession {
-                configureLivePhotoOutputIfPossible()
-                updateLivePhotoAvailability()
+                refreshRAWAvailability()
+                reevaluateLivePhotoCompatibility()
+#if DEBUG
+                debugLogCameraConfiguration(context: "initial configuration")
+#endif
             }
         }
 
@@ -913,7 +910,6 @@ final class CameraService: NSObject, ObservableObject {
             guard session.canAddInput(input) else { return }
             session.addInput(input)
             cameraInput = input
-            selectHighestResolutionPhotoFormat(for: device)
 
             videoOutput.alwaysDiscardsLateVideoFrames = true
             // The .photo preset otherwise allows AVFoundation to hand the data
@@ -934,7 +930,7 @@ final class CameraService: NSObject, ObservableObject {
                 session.addOutput(photoOutput)
                 photoOutput.maxPhotoQualityPrioritization = .quality
                 enableAppleProRAWIfSupported()
-                updateMaximumPhotoDimensions(for: device)
+                updatePhotoResolutionCapabilities(for: device)
             }
             if AVCaptureDevice.authorizationStatus(for: .audio) == .authorized {
                 _ = addAudioInputDuringConfiguration()
@@ -968,7 +964,17 @@ final class CameraService: NSObject, ObservableObject {
         requestedDisplayFactor: CGFloat? = nil,
         switchToken: UUID? = nil
     ) {
+        let wasRunning = session.isRunning
+        if wasRunning { session.stopRunning() }
         session.beginConfiguration()
+        let hasCompatiblePreset = session.canSetSessionPreset(.photo)
+        if hasCompatiblePreset {
+            session.sessionPreset = .photo
+        }
+        // Disable the old device's capability before replacing its input. The
+        // final configuration is reevaluated and enabled again after commit.
+        photoOutput.isLivePhotoCaptureEnabled = false
+        photoOutput.isLivePhotoAutoTrimmingEnabled = false
         if let cameraInput { session.removeInput(cameraInput) }
         var didReplaceInput = false
         do {
@@ -977,9 +983,11 @@ final class CameraService: NSObject, ObservableObject {
                 session.addInput(newInput)
                 cameraInput = newInput
                 didReplaceInput = true
-                selectHighestResolutionPhotoFormat(for: device)
                 enableAppleProRAWIfSupported()
-                updateMaximumPhotoDimensions(for: device)
+                if AVCaptureDevice.authorizationStatus(for: .audio) == .authorized {
+                    _ = addAudioInputDuringConfiguration()
+                }
+                updatePhotoResolutionCapabilities(for: device)
                 configureVideoConnectionFallback(for: device)
                 updateDeviceState(
                     device,
@@ -997,8 +1005,11 @@ final class CameraService: NSObject, ObservableObject {
             return
         }
         refreshRAWAvailability()
-        configureLivePhotoOutputIfPossible()
-        updateLivePhotoAvailability()
+        reevaluateLivePhotoCompatibility(allowingCapture: hasCompatiblePreset)
+#if DEBUG
+        debugLogCameraConfiguration(context: "camera input replaced")
+#endif
+        if wasRunning { session.startRunning() }
         Task { @MainActor in
             self.configureRotationCoordinator(for: device, switchToken: switchToken)
             self.isRunning = self.session.isRunning
@@ -1019,8 +1030,17 @@ final class CameraService: NSObject, ObservableObject {
         }
     }
 
-    nonisolated private func updateLivePhotoAvailability() {
-        let available = photoOutput.isLivePhotoCaptureSupported && photoOutput.isLivePhotoCaptureEnabled
+    @discardableResult
+    nonisolated private func reevaluateLivePhotoCompatibility(
+        allowingCapture: Bool = true
+    ) -> Bool {
+        let available = allowingCapture
+            && audioInput != nil
+            && photoOutput.isLivePhotoCaptureSupported
+        if photoOutput.isLivePhotoCaptureEnabled != available {
+            photoOutput.isLivePhotoCaptureEnabled = available
+        }
+        photoOutput.isLivePhotoAutoTrimmingEnabled = available
         Task { @MainActor in
 #if DEBUG && targetEnvironment(simulator)
             guard !self.isSimulatorDemoCameraEnabled else { return }
@@ -1028,14 +1048,7 @@ final class CameraService: NSObject, ObservableObject {
             self.isLivePhotoAvailable = available
             if !available { self.selectedMotion = .photo }
         }
-    }
-
-    nonisolated private func configureLivePhotoOutputIfPossible() {
-        let enabled = audioInput != nil && photoOutput.isLivePhotoCaptureSupported
-        if enabled && !photoOutput.isLivePhotoCaptureEnabled {
-            photoOutput.isLivePhotoCaptureEnabled = true
-        }
-        photoOutput.isLivePhotoAutoTrimmingEnabled = enabled
+        return available
     }
 
     nonisolated private func addAudioInputDuringConfiguration() -> Bool {
@@ -1052,29 +1065,26 @@ final class CameraService: NSObject, ObservableObject {
         let wasRunning = session.isRunning
         if wasRunning { session.stopRunning() }
 
-        // A manually selected high-resolution activeFormat places the session
-        // in input-priority mode and can make Live Photo unavailable. Return
-        // configuration ownership to AVFoundation's native photo preset before
-        // querying and enabling Live Photo support.
         session.beginConfiguration()
+        photoOutput.isLivePhotoCaptureEnabled = false
+        photoOutput.isLivePhotoAutoTrimmingEnabled = false
         let hasAudio = addAudioInputDuringConfiguration()
         let hasCompatiblePreset = session.canSetSessionPreset(.photo)
         if hasCompatiblePreset {
             session.sessionPreset = .photo
         }
+        if let device = cameraInput?.device {
+            updatePhotoResolutionCapabilities(for: device)
+        }
         session.commitConfiguration()
 
-        let available: Bool
-        if hasAudio, hasCompatiblePreset, photoOutput.isLivePhotoCaptureSupported {
-            configureLivePhotoOutputIfPossible()
-            if photoOutput.isLivePhotoCaptureEnabled, let device = cameraInput?.device {
-                updateMaximumPhotoDimensions(for: device)
-            }
-            available = photoOutput.isLivePhotoCaptureSupported
-                && photoOutput.isLivePhotoCaptureEnabled
-        } else {
-            available = false
-        }
+        refreshRAWAvailability()
+        let available = reevaluateLivePhotoCompatibility(
+            allowingCapture: hasAudio && hasCompatiblePreset
+        )
+#if DEBUG
+        debugLogCameraConfiguration(context: "Live Photo configuration")
+#endif
         if wasRunning { session.startRunning() }
 
         Task { @MainActor in
@@ -1098,51 +1108,10 @@ final class CameraService: NSObject, ObservableObject {
         }
     }
 
-    /// Chooses a true photo format with the largest still-photo dimensions.
-    /// Do not require a 30 fps range here: on high-resolution sensors that can
-    /// discard the only format exposing the native 48 MP photo dimensions.
-    /// Among equivalent still formats, prefer the largest video stream so the
-    /// Metal preview is not fed a low-resolution rear-camera buffer.
-    nonisolated private func selectHighestResolutionPhotoFormat(for device: AVCaptureDevice) {
-        guard let best = highestResolutionPhotoFormat(for: device), best !== device.activeFormat else { return }
-        _ = setActiveFormat(best, for: device)
-    }
-
-    @discardableResult
-    nonisolated private func setActiveFormat(
-        _ format: AVCaptureDevice.Format,
-        for device: AVCaptureDevice
-    ) -> Bool {
-        guard format !== device.activeFormat else { return true }
-        do {
-            try device.lockForConfiguration()
-            device.activeFormat = format
-            device.unlockForConfiguration()
-            return true
-        } catch {
-            return false
-        }
-    }
-
-    nonisolated private func highestResolutionPhotoFormat(for device: AVCaptureDevice) -> AVCaptureDevice.Format? {
-        let formatsWithPhotoDimensions = device.formats.filter {
-            !$0.supportedMaxPhotoDimensions.isEmpty
-        }
-        let highestQualityFormats = formatsWithPhotoDimensions.filter(\.isHighestPhotoQualitySupported)
-        let candidates = highestQualityFormats.isEmpty ? formatsWithPhotoDimensions : highestQualityFormats
-        return candidates.max { lhs, rhs in
-            let lhsPhotoPixels = Self.maximumPhotoPixels(for: lhs)
-            let rhsPhotoPixels = Self.maximumPhotoPixels(for: rhs)
-            if lhsPhotoPixels != rhsPhotoPixels { return lhsPhotoPixels < rhsPhotoPixels }
-            let lhsVideo = CMVideoFormatDescriptionGetDimensions(lhs.formatDescription)
-            let rhsVideo = CMVideoFormatDescriptionGetDimensions(rhs.formatDescription)
-            let lhsVideoPixels = Int64(lhsVideo.width) * Int64(lhsVideo.height)
-            let rhsVideoPixels = Int64(rhsVideo.width) * Int64(rhsVideo.height)
-            return lhsVideoPixels < rhsVideoPixels
-        }
-    }
-
-    nonisolated private func updateMaximumPhotoDimensions(for device: AVCaptureDevice) {
+    /// Discovers still resolutions from the format selected by AVFoundation's
+    /// `.photo` preset. Resolution changes only update photo-output/settings
+    /// dimensions; they never take ownership of `device.activeFormat`.
+    nonisolated private func updatePhotoResolutionCapabilities(for device: AVCaptureDevice) {
         let supported = device.activeFormat.supportedMaxPhotoDimensions.sorted(by: {
             Int64($0.width) * Int64($0.height) < Int64($1.width) * Int64($1.height)
         })
@@ -1156,15 +1125,43 @@ final class CameraService: NSObject, ObservableObject {
             distinct.append(dimensions)
         }
         if distinct.isEmpty { distinct = [maximum] }
-        let maximumMegapixels = Self.megapixels(for: maximum)
-        var values = distinct.map(Self.megapixels(for:)).filter { $0 > 0 }
-        if maximumMegapixels >= 24, !values.contains(24) { values.append(24) }
-        values = Array(Set(values)).sorted()
-        if values.isEmpty { values = [maximumMegapixels] }
-        let preferredMegapixels = values.contains(24) ? 24 : values[0]
-        let preferred = preferredMegapixels == 24 ? maximum : (distinct.min {
-            abs(Self.megapixels(for: $0) - preferredMegapixels) < abs(Self.megapixels(for: $1) - preferredMegapixels)
-        } ?? maximum)
+        var values = Array(Set(distinct.map(Self.megapixels(for:)).filter { $0 > 0 })).sorted()
+        if values.isEmpty { values = [Self.megapixels(for: maximum)] }
+        // Hibiscus can produce a true 24 MP processed output from a larger
+        // supported source without assigning an unsupported capture dimension.
+        // Keep RAW choices limited to dimensions the active format reports.
+        if values.contains(where: { $0 > 24 }), !values.contains(24) {
+            values.append(24)
+            values.sort()
+        }
+
+        resolutionLock.lock()
+        let requestedMegapixels = requestedPhotoMegapixels
+        resolutionLock.unlock()
+        let preferredMegapixels: Int
+        if let requestedMegapixels, values.contains(requestedMegapixels) {
+            preferredMegapixels = requestedMegapixels
+        } else if values.contains(24) {
+            preferredMegapixels = 24
+        } else if values.contains(12) {
+            preferredMegapixels = 12
+        } else {
+            preferredMegapixels = values[0]
+        }
+        let hasNativePreferred = distinct.contains {
+            Self.megapixels(for: $0) == preferredMegapixels
+        }
+        let preferred: CMVideoDimensions
+        if preferredMegapixels == 24, !hasNativePreferred {
+            preferred = distinct.first {
+                Self.megapixels(for: $0) > preferredMegapixels
+            } ?? maximum
+        } else {
+            preferred = distinct.min {
+                abs(Self.megapixels(for: $0) - preferredMegapixels)
+                    < abs(Self.megapixels(for: $1) - preferredMegapixels)
+            } ?? maximum
+        }
         resolutionLock.lock()
         supportedPhotoDimensions = distinct
         capturePhotoDimensions = preferred
@@ -1201,12 +1198,6 @@ final class CameraService: NSObject, ObservableObject {
             return label
         }
         return Int(measured.rounded())
-    }
-
-    nonisolated private static func maximumPhotoPixels(for format: AVCaptureDevice.Format) -> Int64 {
-        format.supportedMaxPhotoDimensions.map {
-            Int64($0.width) * Int64($0.height)
-        }.max() ?? 0
     }
 
     nonisolated private func supportedRAWPhotoMegapixels() -> [Int] {
@@ -1413,8 +1404,7 @@ final class CameraService: NSObject, ObservableObject {
             CameraLensTarget(displayFactor: displayFactor, device: device, deviceZoomFactor: 1)
         }
         for (device, baseDisplayFactor) in zip(physicalDevices, nativeDisplayFactors) {
-            let format = highestResolutionPhotoFormat(for: device) ?? device.activeFormat
-            for zoomFactor in format.secondaryNativeResolutionZoomFactors {
+            for zoomFactor in device.activeFormat.secondaryNativeResolutionZoomFactors {
                 let displayFactor = baseDisplayFactor * zoomFactor
                 guard zoomFactor >= device.minAvailableVideoZoomFactor,
                       zoomFactor <= device.maxAvailableVideoZoomFactor,
@@ -1434,11 +1424,10 @@ final class CameraService: NSObject, ObservableObject {
         if physicalDevices.count == 1,
            let device = physicalDevices.first,
            let baseDisplayFactor = nativeDisplayFactors.first {
-            let format = highestResolutionPhotoFormat(for: device) ?? device.activeFormat
             for displayFactor in [CGFloat(3), CGFloat(4)] {
                 let zoomFactor = displayFactor / max(0.01, baseDisplayFactor)
                 guard zoomFactor >= device.minAvailableVideoZoomFactor,
-                      zoomFactor <= format.videoMaxZoomFactor,
+                      zoomFactor <= device.activeFormat.videoMaxZoomFactor,
                       !targets.contains(where: { abs($0.displayFactor - displayFactor) < 0.025 }) else { continue }
                 targets.append(CameraLensTarget(
                     displayFactor: displayFactor,
@@ -1568,6 +1557,33 @@ final class CameraService: NSObject, ObservableObject {
         }
         return device.constituentDevices.contains(where: { $0.deviceType == .builtInUltraWideCamera }) ? 0.5 : 1
     }
+
+#if DEBUG
+    nonisolated private func debugLogCameraConfiguration(context: String) {
+        let device = cameraInput?.device
+        let activeDimensions = device.map {
+            CMVideoFormatDescriptionGetDimensions($0.activeFormat.formatDescription)
+        } ?? CMVideoDimensions(width: 0, height: 0)
+        let supportedDimensions = device?.activeFormat.supportedMaxPhotoDimensions.map {
+            "\($0.width)x\($0.height) (~\(Self.megapixels(for: $0)) MP)"
+        }.joined(separator: ", ") ?? "none"
+        let selectedDimensions = selectedPhotoDimensions()
+        let selectedMegapixels = selectedTargetMegapixels()
+        print(
+            """
+            [Hibiscus Camera] \(context)
+              sessionPreset: \(session.sessionPreset.rawValue)
+              activeDevice: \(device?.localizedName ?? "none") [\(device?.uniqueID ?? "none")]
+              activeFormatDimensions: \(activeDimensions.width)x\(activeDimensions.height)
+              supportedMaxPhotoDimensions: [\(supportedDimensions)]
+              selectedPhotoResolution: \(selectedDimensions.width)x\(selectedDimensions.height) (~\(selectedMegapixels) MP)
+              isLivePhotoCaptureSupported: \(photoOutput.isLivePhotoCaptureSupported)
+              isLivePhotoCaptureEnabled: \(photoOutput.isLivePhotoCaptureEnabled)
+              hasAudioInput: \(audioInput != nil)
+            """
+        )
+    }
+#endif
 
     private func startSessionOnly() {
         sessionQueue.async { [weak self] in self?.startSessionOnlyFromQueue() }

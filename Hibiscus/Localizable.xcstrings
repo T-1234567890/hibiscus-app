@@ -601,6 +601,16 @@
         }
       }
     },
+    "Current" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前选择"
+          }
+        }
+      }
+    },
     "Cycles through the available lenses" : {
 
     },
@@ -1536,9 +1546,6 @@
     "RAW" : {
 
     },
-    "RAW %lld MP" : {
-
-    },
     "Ready" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2002,6 +2009,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "关闭增强"
+          }
+        }
+      }
+    },
+    "Unavailable" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不可用"
           }
         }
       }
