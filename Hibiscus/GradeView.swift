@@ -1888,7 +1888,7 @@ private struct PolaroidComposerSheet: View {
             formatter.timeStyle = .short
             lines.append(formatter.string(from: date).uppercased())
         }
-        if includesLocation, let location = metadata.location { lines.append(location.uppercased()) }
+        if includesLocation, let location = metadata.displayLocation { lines.append(location.uppercased()) }
         let camera = metadata.cameraCharacter.map { "\($0.symbol) \($0.name.uppercased()) · " } ?? ""
         lines.append("\(camera)\(settings.style.rawValue.uppercased())")
         return Array(lines.prefix(3))

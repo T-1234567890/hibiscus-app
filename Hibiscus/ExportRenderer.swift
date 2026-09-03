@@ -62,6 +62,7 @@ nonisolated enum PhotoMetadataExtractor {
 
         let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any]
         let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any]
+        let iptc = properties[kCGImagePropertyIPTCDictionary] as? [CFString: Any]
         let dateString = (exif?[kCGImagePropertyExifDateTimeOriginal] as? String)
             ?? (exif?[kCGImagePropertyExifDateTimeDigitized] as? String)
             ?? (tiff?[kCGImagePropertyTIFFDateTime] as? String)
@@ -80,7 +81,7 @@ nonisolated enum PhotoMetadataExtractor {
             let northSouth = (latitude ?? 0) >= 0 ? "N" : "S"
             let eastWest = (longitude ?? 0) >= 0 ? "E" : "W"
             location = String(
-                format: "%.4f°%@ · %.4f°%@",
+                format: "%.2f°%@ · %.2f°%@",
                 abs(latitude ?? 0), northSouth, abs(longitude ?? 0), eastWest
             )
         }
@@ -88,6 +89,7 @@ nonisolated enum PhotoMetadataExtractor {
         return PhotoMetadata(
             date: date,
             location: location,
+            city: iptc?[kCGImagePropertyIPTCCity] as? String,
             cameraCharacter: nil,
             latitude: latitude,
             longitude: longitude,
@@ -382,7 +384,7 @@ nonisolated enum HibiscusExportRenderer {
             formatter.dateFormat = "MMM d yyyy · HH:mm"
             lines.append(formatter.string(from: date).uppercased())
         }
-        if includesLocation, let location = metadata.location {
+        if includesLocation, let location = metadata.displayLocation {
             lines.append(location.uppercased())
         }
         let camera = metadata.cameraCharacter.map { "\($0.symbol) \($0.name.uppercased()) · " } ?? ""

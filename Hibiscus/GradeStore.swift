@@ -6,6 +6,7 @@ import UIKit
 nonisolated struct PhotoMetadata: Equatable, Sendable {
     var date: Date?
     var location: String?
+    var city: String?
     var cameraCharacter: CameraCharacter?
     var latitude: Double?
     var longitude: Double?
@@ -16,6 +17,7 @@ nonisolated struct PhotoMetadata: Equatable, Sendable {
     init(
         date: Date? = nil,
         location: String? = nil,
+        city: String? = nil,
         cameraCharacter: CameraCharacter? = nil,
         latitude: Double? = nil,
         longitude: Double? = nil,
@@ -25,12 +27,23 @@ nonisolated struct PhotoMetadata: Equatable, Sendable {
     ) {
         self.date = date
         self.location = location
+        self.city = city
         self.cameraCharacter = cameraCharacter
         self.latitude = latitude
         self.longitude = longitude
         self.cameraMake = cameraMake
         self.cameraModel = cameraModel
         self.lensModel = lensModel
+    }
+
+    var displayLocation: String? {
+        let cityName = city?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let coordinate = location?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = [cityName, coordinate].compactMap { value -> String? in
+            guard let value, !value.isEmpty else { return nil }
+            return value
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
 
@@ -67,7 +80,7 @@ struct GradeSessionPhoto: Identifiable {
     var automaticEnhance: EnhanceAdjustment
     var isAccentCustomized: Bool
     var styleSessions: [GradeStyle: GradeStyleSession]
-    let metadata: PhotoMetadata
+    var metadata: PhotoMetadata
     let livePhoto: LivePhotoSource?
 }
 
@@ -206,6 +219,7 @@ final class GradeStore: ObservableObject {
         loadCurrentPhoto(expandStyleRail: preferredStyle == nil)
         if let preferredStyle { preferences.lastGradeStyle = preferredStyle }
         analyzePhotos(for: newPhotos.map { ($0.id, $0.thumbnail) })
+        resolveCityNames(for: newPhotos.map { ($0.id, $0.metadata) })
         statusMessage = nil
     }
 
@@ -1052,6 +1066,29 @@ final class GradeStore: ObservableObject {
                         self.render()
                     }
                 }
+            }
+        }
+    }
+
+    private func resolveCityNames(for entries: [(UUID, PhotoMetadata)]) {
+        let unresolved = entries.compactMap { id, metadata -> (UUID, Double, Double)? in
+            guard (metadata.city ?? "").isEmpty,
+                  let latitude = metadata.latitude,
+                  let longitude = metadata.longitude else { return nil }
+            return (id, latitude, longitude)
+        }
+        guard !unresolved.isEmpty else { return }
+        let locale = LanguageManager.shared.locale
+
+        Task { [weak self] in
+            for (id, latitude, longitude) in unresolved {
+                guard let city = await PhotoCityResolver.shared.cityName(
+                    latitude: latitude,
+                    longitude: longitude,
+                    locale: locale
+                ), let self,
+                      let index = self.photos.firstIndex(where: { $0.id == id }) else { continue }
+                self.photos[index].metadata.city = city
             }
         }
     }
