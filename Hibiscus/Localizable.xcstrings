@@ -1,6 +1,17 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Long Press to Show Original" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "长按显示原图"
+          }
+        }
+      }
+    },
     "" : {
 
     },
@@ -144,6 +155,7 @@
       }
     },
     "Allow full Photos access to preserve Live Photos." : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -179,6 +191,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "将风格应用到全部"
+          }
+        }
+      }
+    },
+    "Attach location metadata to Camera captures." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将位置元数据附加到相机拍摄内容。"
           }
         }
       }
@@ -368,6 +390,17 @@
         }
       }
     },
+    "Choose Photos" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择照片"
+          }
+        }
+      }
+    },
     "Clean Modern" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -375,6 +408,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "现代纯净"
+          }
+        }
+      }
+    },
+    "Close" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭"
           }
         }
       }
@@ -951,6 +995,17 @@
         }
       }
     },
+    "Fullscreen photo preview" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全屏照片预览"
+          }
+        }
+      }
+    },
     "General" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1058,6 +1113,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "隐藏相机色彩板"
+          }
+        }
+      }
+    },
+    "Import" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导入"
+          }
+        }
+      }
+    },
+    "Import Photos" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导入照片"
           }
         }
       }
@@ -1202,6 +1279,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在载入照片…"
+          }
+        }
+      }
+    },
+    "Loading Photos" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在载入照片"
           }
         }
       }
@@ -1513,6 +1601,17 @@
         }
       }
     },
+    "Preserve Live Photo" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保留实况照片"
+          }
+        }
+      }
+    },
     "Preserve Metadata" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1728,6 +1827,16 @@
         }
       }
     },
+    "Save Location" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存位置"
+          }
+        }
+      }
+    },
     "Save Look" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1891,6 +2000,17 @@
         }
       }
     },
+    "Some photos couldn’t be loaded. Try selecting them again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "部分照片无法载入，请重新选择。"
+          }
+        }
+      }
+    },
     "Street" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1973,6 +2093,17 @@
         }
       }
     },
+    "Tap the Live Photo icon to keep motion or import a still." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点实况图标，选择保留动态或仅导入静态照片。"
+          }
+        }
+      }
+    },
     "Terms of Service" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1984,6 +2115,7 @@
       }
     },
     "These photos couldn’t be opened." : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {

@@ -1,5 +1,6 @@
 @preconcurrency import AVFoundation
 import CoreImage
+import CoreLocation
 import ImageIO
 import Photos
 import PhotosUI
@@ -12,19 +13,22 @@ nonisolated struct LivePhotoSource: @unchecked Sendable {
     let stillURL: URL
     let motionURL: URL
     let assetIdentifier: String?
+    let location: CLLocation?
 
     init(
         id: UUID = UUID(),
         directoryURL: URL,
         stillURL: URL,
         motionURL: URL,
-        assetIdentifier: String?
+        assetIdentifier: String?,
+        location: CLLocation? = nil
     ) {
         self.id = id
         self.directoryURL = directoryURL
         self.stillURL = stillURL
         self.motionURL = motionURL
         self.assetIdentifier = assetIdentifier
+        self.location = location
     }
 
     func removeOwnedResources() {
@@ -36,6 +40,7 @@ nonisolated struct ProcessedLivePhoto: @unchecked Sendable {
     let directoryURL: URL
     let stillURL: URL
     let motionURL: URL
+    let location: CLLocation?
 
     func cleanUp() {
         try? FileManager.default.removeItem(at: directoryURL)
@@ -43,58 +48,16 @@ nonisolated struct ProcessedLivePhoto: @unchecked Sendable {
 }
 
 nonisolated enum LivePhotoImportLoader {
-    nonisolated struct Result: @unchecked Sendable {
-        let item: GradeImportItem?
-        let livePhotoWasFlattened: Bool
-    }
-
-    static func load(_ pickerItem: PhotosPickerItem) async -> Result {
-        let indicatesLivePhoto = pickerItem.supportedContentTypes.contains {
-            $0.conforms(to: .livePhoto)
-        }
-        let stillData = try? await pickerItem.loadTransferable(type: Data.self)
-
-        var liveSource: LivePhotoSource?
-        if indicatesLivePhoto, let identifier = pickerItem.itemIdentifier {
-            let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
-            if status == .authorized || status == .limited {
-                liveSource = await copyResources(for: identifier)
-            }
-        }
-
-        let sourceData: Data?
-        if let liveSource {
-            sourceData = try? Data(contentsOf: liveSource.stillURL, options: .mappedIfSafe)
-        } else {
-            sourceData = stillData
-        }
-        guard let sourceData,
-              let image = AccentAnalyzer.downsample(sourceData, maxDimension: 4096) ?? UIImage(data: sourceData) else {
-            liveSource?.removeOwnedResources()
-            return Result(item: nil, livePhotoWasFlattened: false)
-        }
-        let thumbnail = AccentAnalyzer.downsample(sourceData, maxDimension: 384)
-            ?? ImageRenderer.resizedImage(image, maxDimension: 384)
-            ?? image
-        return Result(
-            item: GradeImportItem(
-                image: image,
-                thumbnail: thumbnail,
-                metadata: PhotoMetadataExtractor.metadata(from: sourceData),
-                livePhoto: liveSource
-            ),
-            livePhotoWasFlattened: indicatesLivePhoto && liveSource == nil
-        )
-    }
-
-    private static func copyResources(for identifier: String) async -> LivePhotoSource? {
-        guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil).firstObject,
-              asset.mediaSubtypes.contains(.photoLive) else { return nil }
-        let resources = PHAssetResource.assetResources(for: asset)
-        let still = resources.first(where: { $0.type == .fullSizePhoto })
-            ?? resources.first(where: { $0.type == .photo })
-        let motion = resources.first(where: { $0.type == .fullSizePairedVideo })
-            ?? resources.first(where: { $0.type == .pairedVideo })
+    static func copyResources(
+        _ resources: [PHAssetResource], identifier: String? = nil, location: CLLocation? = nil
+    ) async -> LivePhotoSource? {
+        // Pick a matching representation pair; don't mix an edited key photo
+        // with the original motion resource.
+        let fullStill = resources.first(where: { $0.type == .fullSizePhoto })
+        let fullMotion = resources.first(where: { $0.type == .fullSizePairedVideo })
+        let useFullSize = fullStill != nil && fullMotion != nil
+        let still = useFullSize ? fullStill : resources.first(where: { $0.type == .photo })
+        let motion = useFullSize ? fullMotion : resources.first(where: { $0.type == .pairedVideo })
         guard let still, let motion else { return nil }
 
         let directory = FileManager.default.temporaryDirectory
@@ -120,7 +83,8 @@ nonisolated enum LivePhotoImportLoader {
             directoryURL: directory,
             stillURL: stillURL,
             motionURL: motionURL,
-            assetIdentifier: identifier
+            assetIdentifier: identifier,
+            location: location
         )
     }
 
@@ -162,11 +126,17 @@ nonisolated enum LivePhotoProcessor {
                   to: motionURL,
                   settings: livePhotoSettings,
                   presetName: preview ? AVAssetExportPresetMediumQuality : AVAssetExportPresetHighestQuality
-              ) else {
+              ),
+              await isValidLivePhotoPair(stillURL: stillURL, motionURL: motionURL) else {
             try? FileManager.default.removeItem(at: directory)
             return nil
         }
-        return ProcessedLivePhoto(directoryURL: directory, stillURL: stillURL, motionURL: motionURL)
+        return ProcessedLivePhoto(
+            directoryURL: directory,
+            stillURL: stillURL,
+            motionURL: motionURL,
+            location: source.location
+        )
     }
 
     static func processCameraCapture(
@@ -175,7 +145,8 @@ nonisolated enum LivePhotoProcessor {
         character: CameraCharacter?,
         adjustment: CameraCharacterAdjustment,
         aspectRatio: CGFloat,
-        targetMegapixels: Int
+        targetMegapixels: Int,
+        location: CLLocation?
     ) async -> ProcessedLivePhoto? {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("HibiscusCameraLivePhotoExports", isDirectory: true)
@@ -208,7 +179,12 @@ nonisolated enum LivePhotoProcessor {
         )
         if renderedMotion,
            await isValidLivePhotoPair(stillURL: stillURL, motionURL: motionURL) {
-            return ProcessedLivePhoto(directoryURL: directory, stillURL: stillURL, motionURL: motionURL)
+            return ProcessedLivePhoto(
+                directoryURL: directory,
+                stillURL: stillURL,
+                motionURL: motionURL,
+                location: location
+            )
         }
 
         // Some hardware/OS combinations drop the Live Photo metadata track
@@ -217,7 +193,12 @@ nonisolated enum LivePhotoProcessor {
         try? FileManager.default.removeItem(at: motionURL)
         if (try? FileManager.default.copyItem(at: sourceMotionURL, to: motionURL)) != nil,
            await isValidLivePhotoPair(stillURL: stillURL, motionURL: motionURL) {
-            return ProcessedLivePhoto(directoryURL: directory, stillURL: stillURL, motionURL: motionURL)
+            return ProcessedLivePhoto(
+                directoryURL: directory,
+                stillURL: stillURL,
+                motionURL: motionURL,
+                location: location
+            )
         }
 
         // The native AVCapturePhotoOutput pair is the final lossless fallback.
@@ -236,7 +217,12 @@ nonisolated enum LivePhotoProcessor {
             try? FileManager.default.removeItem(at: directory)
             return nil
         }
-        return ProcessedLivePhoto(directoryURL: directory, stillURL: stillURL, motionURL: motionURL)
+        return ProcessedLivePhoto(
+            directoryURL: directory,
+            stillURL: stillURL,
+            motionURL: motionURL,
+            location: location
+        )
     }
 
     private static func isValidLivePhotoPair(stillURL: URL, motionURL: URL) async -> Bool {
@@ -339,7 +325,7 @@ nonisolated enum LivePhotoProcessor {
         export.videoComposition = AVVideoComposition(asset: asset) { request in
             let source = request.sourceImage
             let output = ImageRenderer.gradeCIImage(source, settings: settings).cropped(to: source.extent)
-            request.finish(with: output, context: nil)
+            request.finish(with: output, context: ImageRenderer.context)
         }
         await withCheckedContinuation { continuation in
             export.exportAsynchronously {
@@ -429,6 +415,7 @@ enum LivePhotoLibrarySaver {
             PHPhotoLibrary.shared().performChanges {
                 for output in outputs {
                     let request = PHAssetCreationRequest.forAsset()
+                    request.location = output.location
                     request.addResource(with: .photo, fileURL: output.stillURL, options: nil)
                     request.addResource(with: .pairedVideo, fileURL: output.motionURL, options: nil)
                 }

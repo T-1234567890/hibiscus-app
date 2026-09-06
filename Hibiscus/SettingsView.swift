@@ -98,10 +98,20 @@ struct SettingsView: View {
                         }
                     }
 
+                    Toggle(isOn: $preferences.saveLocation) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Save Location")
+                            Text("Attach location metadata to Camera captures.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
                     Toggle("Remember Exposure", isOn: $preferences.rememberExposure)
                 }
 
                 Section("Grade") {
+                    Toggle("Long Press to Show Original", isOn: $preferences.longPressToShowOriginal)
                     Toggle("Remember Last Style", isOn: $preferences.rememberLastStyle)
                     Toggle("Auto Accent", isOn: $preferences.autoAccent)
                     Toggle("Reset Edits for New Photo", isOn: $preferences.resetEditsForNewPhoto)

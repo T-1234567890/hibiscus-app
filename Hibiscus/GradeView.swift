@@ -7,8 +7,10 @@ struct GradeView: View {
     @ObservedObject var preferences: AppPreferences
     @ObservedObject var savedLooks: SavedLooksStore
     let isActive: Bool
-    @State private var pickerItems: [PhotosPickerItem] = []
+    @State private var showsFullscreenPreview = false
+    @State private var didCompareOriginal = false
     @State private var showsPicker = false
+    @State private var isImportingPhotos = false
     @State private var pickerReplacesSession = true
     @State private var pendingStyle: GradeStyle?
     @State private var shareFiles: [URL] = []
@@ -54,11 +56,6 @@ struct GradeView: View {
                     VStack(spacing: 0) {
                         photoArea
                             .frame(height: previewHeight)
-                            .simultaneousGesture(
-                                TapGesture().onEnded {
-                                    collapseStyleRailIfNeeded()
-                                }
-                            )
 
                         if store.sourceImage != nil {
                             editor(width: proxy.size.width)
@@ -108,8 +105,8 @@ struct GradeView: View {
                     }
             }
 
-            if store.isExporting {
-                ProgressView("Rendering")
+            if store.isExporting || isImportingPhotos {
+                ProgressView(isImportingPhotos ? "Loading Photos" : "Rendering")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
@@ -117,22 +114,33 @@ struct GradeView: View {
                     .frame(maxHeight: .infinity, alignment: .center)
             }
         }
+        .disabled(isImportingPhotos)
         .animation(.easeInOut(duration: 0.22), value: store.statusMessage)
         .tint(.white)
-        .photosPicker(
-            isPresented: $showsPicker,
-            selection: $pickerItems,
-            maxSelectionCount: photoPickerLimit,
-            matching: .any(of: [.images, .livePhotos])
-        )
-        .onChange(of: pickerItems) { _, newItems in
-            guard !newItems.isEmpty else { return }
-            Task { await importPhotos(from: newItems) }
+        .sheet(isPresented: $showsPicker) {
+            GradePhotoImportSheet(limit: photoPickerLimit, completion: importSelectedPhotos)
         }
+        .overlay {
+            if showsFullscreenPreview, let source = store.sourceImage {
+                GradeFullscreenPreview(source: source, settings: store.settings) {
+                    withAnimation(.easeInOut(duration: 0.25)) { showsFullscreenPreview = false }
+                }
+                .transition(.opacity)
+                .zIndex(100)
+            }
+        }
+        .toolbar(showsFullscreenPreview ? .hidden : .visible, for: .tabBar)
         .onChange(of: preferences.experimentalEnhance) { _, isEnabled in
             if !isEnabled {
                 store.disableExperimentalEnhance()
             }
+        }
+        .onChange(of: preferences.longPressToShowOriginal) { _, enabled in
+            guard !enabled else { return }
+            originalPreviewPressTask?.cancel()
+            originalPreviewPressTask = nil
+            store.isShowingOriginal = false
+            didCompareOriginal = false
         }
         .onDisappear {
             originalPreviewPressTask?.cancel()
@@ -271,7 +279,7 @@ struct GradeView: View {
             ZStack(alignment: .bottom) {
                 GradeMetalPreview(
                     renderer: store.previewRenderer,
-                    isActive: isActive && !store.isShowingOriginal
+                    isActive: isActive && !store.isShowingOriginal && !showsFullscreenPreview
                 )
                     .background(Color(uiColor: .secondarySystemBackground))
                     .contentShape(Rectangle())
@@ -285,19 +293,26 @@ struct GradeView: View {
                                 store.isShowingOriginal = false
                                 return
                             }
+                            didCompareOriginal = false
+                            guard preferences.longPressToShowOriginal else { return }
                             originalPreviewPressTask = Task { @MainActor in
                                 do {
                                     try await Task.sleep(for: .seconds(0.38))
                                 } catch {
                                     return
                                 }
-                                guard !Task.isCancelled else { return }
+                                guard !Task.isCancelled, preferences.longPressToShowOriginal else { return }
                                 store.isShowingOriginal = true
+                                didCompareOriginal = true
                                 UIImpactFeedbackGenerator(style: .soft).impactOccurred()
                             }
                         },
                         perform: {}
                     )
+                    .onTapGesture {
+                        guard !didCompareOriginal else { return }
+                        withAnimation(.easeInOut(duration: 0.25)) { showsFullscreenPreview = true }
+                    }
                     .simultaneousGesture(photoPagingGesture)
 
                 if let livePhoto = store.livePhotoPreview, !store.isShowingOriginal {
@@ -1050,33 +1065,37 @@ struct GradeView: View {
         pickerReplacesSession ? 10 : max(1, 10 - store.batchCount)
     }
 
+    private func importSelectedPhotos(_ results: [PHPickerResult]) {
+        showsPicker = false
+        guard !results.isEmpty, !isImportingPhotos else { return }
+        let selection = Array(results.prefix(photoPickerLimit))
+        let replacesSession = pickerReplacesSession
+        let style = pendingStyle
+        pendingStyle = nil
+        isImportingPhotos = true
+        Task {
+            var imports: [GradeImportItem] = []
+            for result in selection {
+                if let item = await GradePickerResourceLoader.load(result.itemProvider) {
+                    imports.append(item)
+                }
+            }
+            if !imports.isEmpty {
+                store.loadBatch(imports, preferredStyle: style, replacing: replacesSession)
+            }
+            if imports.count != selection.count {
+                store.statusMessage = L10n.string("Some photos couldn’t be loaded. Try selecting them again.")
+            }
+            isImportingPhotos = false
+        }
+    }
+
     private func photoHeight(for availableHeight: CGFloat) -> CGFloat {
         if store.sourceImage == nil { return availableHeight }
         let editorReserve: CGFloat = 368
         return min(availableHeight * 0.53, max(280, availableHeight - editorReserve), 438)
     }
 
-    private func importPhotos(from items: [PhotosPickerItem]) async {
-        var imports: [GradeImportItem] = []
-        var flattenedLivePhoto = false
-        for item in items.prefix(10) {
-            let result = await LivePhotoImportLoader.load(item)
-            if let imported = result.item { imports.append(imported) }
-            flattenedLivePhoto = flattenedLivePhoto || result.livePhotoWasFlattened
-        }
-        await MainActor.run {
-            if imports.isEmpty {
-                store.statusMessage = L10n.string("These photos couldn’t be opened.")
-            } else {
-                store.loadBatch(imports, preferredStyle: pendingStyle, replacing: pickerReplacesSession)
-                if flattenedLivePhoto {
-                    store.statusMessage = L10n.string("Allow full Photos access to preserve Live Photos.")
-                }
-            }
-            pendingStyle = nil
-            pickerItems = []
-        }
-    }
 }
 
 private enum GradeStyleRailMode {

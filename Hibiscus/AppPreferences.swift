@@ -33,6 +33,12 @@ final class AppPreferences: ObservableObject {
     }
     @Published var defaultAspectRatio: CameraAspectRatio { didSet { save(defaultAspectRatio.rawValue, for: .defaultAspectRatio) } }
     @Published var autoSaveCaptures: Bool { didSet { save(autoSaveCaptures, for: .autoSaveCaptures) } }
+    @Published var saveLocation: Bool {
+        didSet {
+            save(saveLocation, for: .saveLocation)
+            CaptureLocationProvider.shared.setEnabled(saveLocation)
+        }
+    }
     @Published var rememberExposure: Bool {
         didSet {
             save(rememberExposure, for: .rememberExposure)
@@ -40,6 +46,7 @@ final class AppPreferences: ObservableObject {
         }
     }
     @Published var rememberLastStyle: Bool { didSet { save(rememberLastStyle, for: .rememberLastStyle) } }
+    @Published var longPressToShowOriginal: Bool { didSet { save(longPressToShowOriginal, for: .longPressToShowOriginal) } }
     @Published var autoAccent: Bool { didSet { save(autoAccent, for: .autoAccent) } }
     @Published var resetEditsForNewPhoto: Bool { didSet { save(resetEditsForNewPhoto, for: .resetEditsForNewPhoto) } }
     @Published var experimentalEnhance: Bool { didSet { save(experimentalEnhance, for: .experimentalEnhance) } }
@@ -87,8 +94,10 @@ final class AppPreferences: ObservableObject {
             rawValue: defaults.string(forKey: Key.defaultAspectRatio.rawValue) ?? ""
         ) ?? .standard
         autoSaveCaptures = defaults.object(forKey: Key.autoSaveCaptures.rawValue) as? Bool ?? true
+        saveLocation = defaults.object(forKey: Key.saveLocation.rawValue) as? Bool ?? false
         rememberExposure = defaults.object(forKey: Key.rememberExposure.rawValue) as? Bool ?? false
         rememberLastStyle = defaults.object(forKey: Key.rememberLastStyle.rawValue) as? Bool ?? true
+        longPressToShowOriginal = defaults.object(forKey: Key.longPressToShowOriginal.rawValue) as? Bool ?? true
         autoAccent = defaults.object(forKey: Key.autoAccent.rawValue) as? Bool ?? true
         resetEditsForNewPhoto = defaults.object(forKey: Key.resetEditsForNewPhoto.rawValue) as? Bool ?? true
         experimentalEnhance = defaults.object(forKey: Key.experimentalEnhance.rawValue) as? Bool ?? false
@@ -156,8 +165,10 @@ final class AppPreferences: ObservableObject {
         case defaultLivePhoto = "settings.camera.defaultLivePhoto"
         case defaultAspectRatio = "settings.camera.defaultAspectRatio"
         case autoSaveCaptures = "settings.camera.autoSaveCaptures"
+        case saveLocation = "settings.camera.saveLocation"
         case rememberExposure = "settings.camera.rememberExposure"
         case rememberLastStyle = "settings.grade.rememberLastStyle"
+        case longPressToShowOriginal = "settings.grade.longPressToShowOriginal"
         case autoAccent = "settings.grade.autoAccent"
         case resetEditsForNewPhoto = "settings.grade.resetEditsForNewPhoto"
         case experimentalEnhance = "settings.grade.experimentalEnhance"

@@ -7,7 +7,7 @@ nonisolated final class GradePreviewRenderer: NSObject, MTKViewDelegate, @unchec
     private let device: MTLDevice
     private let context: CIContext
     private let commandQueue: MTLCommandQueue
-    private let colorSpace = CGColorSpace(name: CGColorSpace.displayP3)!
+    private let colorSpace = ImageRenderer.gradeOutputColorSpace
     private var sourceImage: CIImage?
     private var settings = GradeSettings()
     private var renderVersion: UInt64 = 0
@@ -20,7 +20,11 @@ nonisolated final class GradePreviewRenderer: NSObject, MTKViewDelegate, @unchec
             fatalError("Hibiscus requires a Metal-capable iPhone.")
         }
         self.device = device
-        self.context = CIContext(mtlDevice: device, options: [.cacheIntermediates: true])
+        self.context = CIContext(mtlDevice: device, options: [
+            .cacheIntermediates: true,
+            .workingColorSpace: ImageRenderer.gradeWorkingColorSpace,
+            .outputColorSpace: ImageRenderer.gradeOutputColorSpace
+        ])
         self.commandQueue = commandQueue
         super.init()
     }
@@ -31,6 +35,7 @@ nonisolated final class GradePreviewRenderer: NSObject, MTKViewDelegate, @unchec
         view.delegate = self
         view.framebufferOnly = false
         view.colorPixelFormat = .bgra8Unorm
+        (view.layer as? CAMetalLayer)?.colorspace = colorSpace
         view.clearColor = MTLClearColorMake(0.015, 0.015, 0.015, 1)
         view.preferredFramesPerSecond = 60
         view.enableSetNeedsDisplay = false
@@ -81,6 +86,7 @@ nonisolated final class GradePreviewRenderer: NSObject, MTKViewDelegate, @unchec
               let commandBuffer = commandQueue.makeCommandBuffer() else {
             lock.lock()
             isRendering = false
+            submittedVersion &-= 1
             lock.unlock()
             return
         }
@@ -110,7 +116,11 @@ nonisolated final class GradePreviewRenderer: NSObject, MTKViewDelegate, @unchec
         commandBuffer.commit()
     }
 
-    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+        lock.lock()
+        renderVersion &+= 1
+        lock.unlock()
+    }
 
     private func aspectFit(_ image: CIImage, into target: CGRect) -> CIImage {
         let source = image.extent

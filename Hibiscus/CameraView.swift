@@ -819,8 +819,12 @@ struct CameraView: View {
                                     thumbnail: thumbnail,
                                     metadata: PhotoMetadata(
                                         date: camera.capturedDate,
-                                        location: nil,
-                                        cameraCharacter: camera.selectedCamera.character
+                                        location: camera.capturedLocation.map(
+                                            CapturePhotoMetadataCustomizer.coordinateString
+                                        ),
+                                        cameraCharacter: camera.selectedCamera.character,
+                                        latitude: camera.capturedLocation?.coordinate.latitude,
+                                        longitude: camera.capturedLocation?.coordinate.longitude
                                     ),
                                     livePhoto: camera.takeCapturedLivePhotoSource()
                                 ))

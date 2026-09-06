@@ -1,6 +1,7 @@
 @preconcurrency import AVFoundation
 import Combine
 import CoreImage
+import CoreLocation
 import Photos
 import SwiftUI
 import UIKit
@@ -31,6 +32,7 @@ final class CameraService: NSObject, ObservableObject {
     @Published private(set) var capturedPreviewImage: UIImage?
     @Published private(set) var capturedLivePhoto: ProcessedLivePhoto?
     @Published private(set) var capturedDate: Date?
+    @Published private(set) var capturedLocation: CLLocation?
     @Published private(set) var authorizationState: CameraAuthorizationState = .unknown
     @Published private(set) var isRunning = false
     @Published private(set) var flashAvailable = false
@@ -113,6 +115,7 @@ final class CameraService: NSObject, ObservableObject {
     nonisolated(unsafe) private var captureCharacterAdjustment = CameraCharacterAdjustment.centered
     nonisolated(unsafe) private var captureLiveAspectRatio = CameraAspectRatio.standard.portraitRatio
     nonisolated(unsafe) private var captureLiveTargetMegapixels = 12
+    nonisolated(unsafe) private var captureLocation: CLLocation?
     nonisolated(unsafe) private var captureProcessingToken = UUID()
     nonisolated(unsafe) private var acceptsPreviewFrames = true
     nonisolated(unsafe) private var pendingCameraSwitchToken: UUID?
@@ -231,6 +234,8 @@ final class CameraService: NSObject, ObservableObject {
         capturedLivePhoto?.cleanUp()
         capturedLivePhoto = nil
         capturedDate = nil
+        capturedLocation = nil
+        captureLocation = nil
         isSavingCapture = false
         didAutoSaveCapture = false
         didAttemptAutoSaveForCapture = false
@@ -239,6 +244,7 @@ final class CameraService: NSObject, ObservableObject {
         } else if !preferences.rememberExposure {
             exposure = 0
         }
+        CaptureLocationProvider.shared.refreshIfEnabled(preferences.saveLocation)
 #if DEBUG && targetEnvironment(simulator)
         if isSimulatorDemoCameraEnabled {
             startSimulatorDemoCamera()
@@ -325,6 +331,12 @@ final class CameraService: NSObject, ObservableObject {
         isCapturing = true
         isProcessingCapture = true
         capturedDate = Date()
+        CaptureLocationProvider.shared.refreshIfEnabled(preferences.saveLocation)
+        let location = preferences.saveLocation
+            ? CaptureLocationProvider.shared.recentLocation()
+            : nil
+        capturedLocation = location
+        captureLocation = location
         pendingProcessedImage = nil
         pendingPreviewImage = nil
         pendingRawData = nil
@@ -427,6 +439,8 @@ final class CameraService: NSObject, ObservableObject {
         capturedLivePhoto?.cleanUp()
         capturedLivePhoto = nil
         capturedDate = nil
+        capturedLocation = nil
+        captureLocation = nil
         pendingProcessedImage = nil
         pendingPreviewImage = nil
         pendingRawData = nil
@@ -688,7 +702,28 @@ final class CameraService: NSObject, ObservableObject {
             return
         }
         let rawData = pendingRawData
-        let processedData = capturedImage.jpegData(compressionQuality: 0.98)
+        let location = capturedLocation
+        let captureDate = capturedDate
+        let metadata = PhotoMetadata(
+            date: captureDate,
+            location: location.map(CapturePhotoMetadataCustomizer.coordinateString),
+            cameraCharacter: selectedCamera.character,
+            latitude: location?.coordinate.latitude,
+            longitude: location?.coordinate.longitude
+        )
+        let processedData = HibiscusExportRenderer.jpegData(
+            for: capturedImage,
+            metadata: metadata,
+            preservesMetadata: true,
+            includesLocation: location != nil,
+            compressionQuality: 0.98
+        )
+        guard let processedData else {
+            isSavingCapture = false
+            didAutoSaveCapture = false
+            statusMessage = L10n.string("Couldn’t save this photo.")
+            return
+        }
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { [weak self] status in
             guard let service = self else { return }
             guard status == .authorized || status == .limited else {
@@ -700,12 +735,12 @@ final class CameraService: NSObject, ObservableObject {
                 return
             }
             PHPhotoLibrary.shared().performChanges {
-                if let rawData, let processedData {
-                    let request = PHAssetCreationRequest.forAsset()
-                    request.addResource(with: .photo, data: processedData, options: nil)
+                let request = PHAssetCreationRequest.forAsset()
+                request.creationDate = captureDate
+                request.location = location
+                request.addResource(with: .photo, data: processedData, options: nil)
+                if let rawData {
                     request.addResource(with: .alternatePhoto, data: rawData, options: nil)
-                } else {
-                    PHAssetChangeRequest.creationRequestForAsset(from: capturedImage)
                 }
             } completionHandler: { success, _ in
                 Task { @MainActor in
@@ -752,7 +787,8 @@ final class CameraService: NSObject, ObservableObject {
             directoryURL: capturedLivePhoto.directoryURL,
             stillURL: capturedLivePhoto.stillURL,
             motionURL: capturedLivePhoto.motionURL,
-            assetIdentifier: nil
+            assetIdentifier: nil,
+            location: capturedLivePhoto.location
         )
     }
 
@@ -1660,7 +1696,10 @@ extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
 
 extension CameraService: AVCapturePhotoCaptureDelegate {
     nonisolated func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        guard error == nil, let data = photo.fileDataRepresentation() else {
+        let data = captureLocation.map {
+            photo.fileDataRepresentation(with: CapturePhotoMetadataCustomizer(location: $0))
+        } ?? photo.fileDataRepresentation()
+        guard error == nil, let data else {
             return
         }
         if photo.isRawPhoto {
@@ -1753,6 +1792,7 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
         let liveAdjustment = captureCharacterAdjustment
         let liveAspectRatio = captureLiveAspectRatio
         let liveTargetMegapixels = captureLiveTargetMegapixels
+        let liveLocation = captureLocation
         let token = captureProcessingToken
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -1790,7 +1830,8 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
                     character: liveCharacter,
                     adjustment: liveAdjustment,
                     aspectRatio: liveAspectRatio,
-                    targetMegapixels: liveTargetMegapixels
+                    targetMegapixels: liveTargetMegapixels,
+                    location: liveLocation
                 )
             }.value
             try? FileManager.default.removeItem(at: livePhotoMovieURL)

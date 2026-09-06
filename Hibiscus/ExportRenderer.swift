@@ -181,10 +181,11 @@ nonisolated enum HibiscusExportRenderer {
         for image: UIImage,
         metadata: PhotoMetadata,
         preservesMetadata: Bool,
-        includesLocation: Bool
+        includesLocation: Bool,
+        compressionQuality: CGFloat = 0.96
     ) -> Data? {
         guard preservesMetadata, let cgImage = image.cgImage else {
-            return image.jpegData(compressionQuality: 0.96)
+            return image.jpegData(compressionQuality: compressionQuality)
         }
 
         let data = NSMutableData()
@@ -193,10 +194,10 @@ nonisolated enum HibiscusExportRenderer {
             UTType.jpeg.identifier as CFString,
             1,
             nil
-        ) else { return image.jpegData(compressionQuality: 0.96) }
+        ) else { return image.jpegData(compressionQuality: compressionQuality) }
 
         var properties: [CFString: Any] = [
-            kCGImageDestinationLossyCompressionQuality: 0.96
+            kCGImageDestinationLossyCompressionQuality: compressionQuality
         ]
         var tiff: [CFString: Any] = [:]
         if let make = metadata.cameraMake { tiff[kCGImagePropertyTIFFMake] = make }

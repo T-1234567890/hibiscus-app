@@ -3,9 +3,12 @@ import CoreImage.CIFilterBuiltins
 import UIKit
 
 nonisolated enum ImageRenderer {
-    private static let context = CIContext(options: [
+    static let gradeWorkingColorSpace = CGColorSpace(name: CGColorSpace.displayP3)!
+    static let gradeOutputColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    static let context = CIContext(options: [
         .cacheIntermediates: true,
-        .workingColorSpace: CGColorSpace(name: CGColorSpace.displayP3) as Any
+        .workingColorSpace: gradeWorkingColorSpace,
+        .outputColorSpace: gradeOutputColorSpace
     ])
 
     static func cameraPreview(

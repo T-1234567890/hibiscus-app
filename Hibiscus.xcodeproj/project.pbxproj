@@ -268,6 +268,7 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Hibiscus uses the camera to take photos with its ten camera characters.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Hibiscus uses your location only when you choose to add it to Camera captures.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Hibiscus uses the microphone only when you choose to capture a Live Photo with sound.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Hibiscus saves new camera captures and graded photos to your photo library.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Hibiscus reads selected Live Photo resources so it can preserve and grade their motion.";
@@ -310,6 +311,7 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Hibiscus uses the camera to take photos with its ten camera characters.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Hibiscus uses your location only when you choose to add it to Camera captures.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Hibiscus uses the microphone only when you choose to capture a Live Photo with sound.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Hibiscus saves new camera captures and graded photos to your photo library.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Hibiscus reads selected Live Photo resources so it can preserve and grade their motion.";

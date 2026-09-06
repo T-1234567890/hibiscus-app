@@ -34,3 +34,6 @@ fastlane/test_output/
 *.tmp
 *.swp
 *~
+
+# Agent context documents and working notes
+/docs/grade-rendering.md
