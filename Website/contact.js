@@ -19,15 +19,15 @@
           </span>
           <span class="contact-option-detail">Discussion, feedback, feature requests, and bug reports</span>
         </a>
-        <a href="mailto:support@orchestrana.app">
+        <a href="mailto:support@1234567890.dev">
           <span class="contact-option-title">Support</span>
           <span class="contact-option-detail">Help with Hibiscus and technical issues</span>
-          <span class="contact-option-detail">support@orchestrana.app</span>
+          <span class="contact-option-detail">support@1234567890.dev</span>
         </a>
-        <a href="mailto:hello@orchestrana.app">
+        <a href="mailto:hello@1234567890.dev">
           <span class="contact-option-title">Business &amp; more</span>
           <span class="contact-option-detail">Partnerships, press, and everything else</span>
-          <span class="contact-option-detail">hello@orchestrana.app</span>
+          <span class="contact-option-detail">hello@1234567890.dev</span>
         </a>
       </nav>
     </div>
