@@ -244,7 +244,7 @@ nonisolated enum CaptureFlashMode: String, CaseIterable, Identifiable, Sendable 
 
 nonisolated enum CaptureFormatOption: String, CaseIterable, Identifiable, Sendable {
     case processed = "HEIF"
-    case raw = "RAW + HEIF"
+    case raw = "RAW + JPEG"
 
     var id: Self { self }
 }
