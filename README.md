@@ -6,8 +6,12 @@
 <p align="center"><strong>Color by feel.</strong></p>
 
 <p align="center">
-  <a href="https://testflight.apple.com/join/mQQdvTSp">TestFlight</a>
-  ·
+  <a href="https://apps.apple.com/us/app/hibiscus-camera-color/id6806494118">
+    <img src="docs/assets/download-on-the-app-store.svg" alt="Download on the App Store" height="50">
+  </a>
+</p>
+
+<p align="center">
   <a href="https://hibiscus.1234567890.dev">Website</a>
 </p>
 

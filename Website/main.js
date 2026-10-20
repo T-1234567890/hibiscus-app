@@ -15,7 +15,7 @@
       link.removeAttribute("href");
       link.setAttribute("data-unavailable", "true");
       link.setAttribute("aria-disabled", "true");
-      link.setAttribute("aria-label", `${config.downloadLabel || "TestFlight"}. Coming soon.`);
+      link.setAttribute("aria-label", `${config.downloadLabel || "Download"}. Coming soon.`);
       link.addEventListener("click", (event) => event.preventDefault());
     }
   });

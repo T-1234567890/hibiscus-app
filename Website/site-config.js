@@ -1,6 +1,6 @@
-// Update this URL if the public TestFlight invitation changes.
+// Central download destination and button labels for every website page.
 window.HIBISCUS_SITE_CONFIG = {
-  downloadLabel: "TestFlight",
-  downloadHoverLabel: "Join Beta",
-  downloadURL: "https://testflight.apple.com/join/mQQdvTSp"
+  downloadLabel: "Download",
+  downloadHoverLabel: "App Store",
+  downloadURL: "https://apps.apple.com/us/app/hibiscus-camera-color/id6806494118"
 };
